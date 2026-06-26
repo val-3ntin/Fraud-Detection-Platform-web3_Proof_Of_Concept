@@ -1,0 +1,97 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+/**
+ * @title BankingL1Ledger (Synthetic Identity Resistant)
+ * ENHANCEMENT: Implements "Immutable Identity Hash" for fraud detection.
+ */
+contract BankingL1Ledger {
+    
+    struct Block {
+        uint256 id;
+        uint256 timestamp;
+        string transactionData;
+        bytes32 currentHash;
+        bytes32 previousHash;
+    }
+
+    mapping(uint256 => Block) public chain;
+    uint256 public chainLength;
+    address public authorizedValidator;
+
+    // --- NEW: SYNTHETIC FRAUD PREVENTION STORAGE ---
+    // Maps a Hashed SSN/ID to a Hashed Name. 
+    // If an SSN is reused with a different name, we detect it instantly.
+    mapping(bytes32 => bytes32) public identityRegistry; 
+    
+    event BlockMinted(uint256 id, bytes32 currentHash, string data);
+    event IdentityRegistered(bytes32 indexed ssnHash, bytes32 indexed nameHash);
+    event FraudAttemptBlocked(bytes32 indexed ssnHash, bytes32 attemptedNameHash);
+
+    constructor() {
+        authorizedValidator = msg.sender; // Proof of Authority (PoA) [cite: 93]
+        _createGenesisBlock();
+    }
+
+    function _createGenesisBlock() private {
+        bytes32 genesisHash = _calculateHash(block.timestamp, "Genesis", bytes32(0));
+        chain[0] = Block(0, block.timestamp, "Genesis", genesisHash, bytes32(0));
+        chainLength = 1;
+    }
+
+    function _calculateHash(uint256 _time, string memory _data, bytes32 _prev) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(_time, _data, _prev));
+    }
+
+    /**
+     * @dev CORE LOGIC: Registers an identity ONLY if it passes the synthetic check.
+     * @param _ssnHash The Keccak256 hash of the user's SSN (Privacy Preserving).
+     * @param _nameHash The Keccak256 hash of the user's Name.
+     */
+    function registerIdentity(bytes32 _ssnHash, bytes32 _nameHash) public {
+        require(msg.sender == authorizedValidator, "Only authorized nodes can commit to L1.");
+
+        // 1. CHECK: Has this SSN been used before?
+        if (identityRegistry[_ssnHash] != bytes32(0)) {
+            // 2. VERIFY: Does the stored Name Hash match this new Name Hash?
+            if (identityRegistry[_ssnHash] != _nameHash) {
+                // FRAUD DETECTED: Same SSN, different Name.
+                emit FraudAttemptBlocked(_ssnHash, _nameHash);
+                revert("FRAUD ALERT: Synthetic Identity Detected! SSN mismatch.");
+            }
+        } else {
+            // 3. REGISTER: First time seeing this SSN. Lock it to this Name.
+            identityRegistry[_ssnHash] = _nameHash;
+            emit IdentityRegistered(_ssnHash, _nameHash);
+        }
+
+        // 4. ADD BLOCK: Record the successful verification on the ledger [cite: 88]
+        _addBlock("Identity Verified & Recorded");
+    }
+
+    /**
+     * @dev Internal helper to add blocks (Satisfies Part A Structure) [cite: 81]
+     */
+    function _addBlock(string memory _data) private {
+        uint256 id = chainLength;
+        bytes32 prevHash = chain[id - 1].currentHash;
+        uint256 time = block.timestamp;
+        bytes32 newHash = _calculateHash(time, _data, prevHash);
+        
+        chain[id] = Block(id, time, _data, newHash, prevHash);
+        chainLength++;
+        
+        emit BlockMinted(id, newHash, _data);
+    }
+
+    /**
+     * @dev Automatic sequence verification (Satisfies Part A Validation) [cite: 14]
+     */
+    function verifyChain() public view returns (bool) {
+        for (uint256 i = 1; i < chainLength; i++) {
+            if (chain[i].previousHash != chain[i-1].currentHash) return false;
+            if (chain[i].currentHash != _calculateHash(chain[i].timestamp, chain[i].transactionData, chain[i].previousHash)) return false;
+        }
+        return true;
+    }
+}
