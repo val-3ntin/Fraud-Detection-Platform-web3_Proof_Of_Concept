@@ -1,0 +1,41 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+/**
+ * @title VerifiedIdentityNFT (ERC-721)
+ * @dev Issues 'Soulbound' certificates only after L1 fraud checks are passed.
+ * Satisfies PGFM03 Part B: ERC-721 Token[cite: 123].
+ */
+contract VerifiedIdentityNFT is ERC721, Ownable {
+    uint256 public nextTokenId;
+    
+    // Stores the Identity Hash inside the NFT for cross-reference
+    mapping(uint256 => bytes32) public identityHashes;
+
+    constructor() ERC721("VerifiedIdentity", "VID") Ownable(msg.sender) {}
+
+    /**
+     * @dev Issues a new Identity NFT. 
+     * In a real system, this would only be called by the L1 Ledger or an oracle.
+     */
+    function mintIdentity(address _user, bytes32 _safeHash) external onlyOwner {
+        uint256 id = nextTokenId++;
+        _safeMint(_user, id);
+        identityHashes[id] = _safeHash;
+    }
+
+    /**
+     * @dev Soulbound: Blocks transfers to prevent selling identities.
+     */
+    function _update(address to, uint256 tokenId, address auth) internal virtual override returns (address) {
+        address from = _ownerOf(tokenId);
+        // If it's a transfer (not minting/burning), block it.
+        if (from != address(0) && to != address(0)) {
+            revert("Identity NFTs are Soulbound and cannot be transferred.");
+        }
+        return super._update(to, tokenId, auth);
+    }
+}
