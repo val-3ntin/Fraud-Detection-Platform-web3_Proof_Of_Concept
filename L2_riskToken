@@ -1,0 +1,74 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+/**
+ * @title InstitutionalRiskToken (ERC-20)
+ * @dev Satisfies PGFM03 Part B: Contract Type 1 (ERC-20).
+ * USE CASE: Used by banks to track 'Risk Score'. High risk = Frozen funds.
+ */
+contract InstitutionalRiskToken is ERC20, Ownable {
+    // Mapping to store the risk score (0-100) for each address
+    mapping(address => uint256) public riskScores;
+    
+    // Mapping to freeze accounts suspected of Synthetic Fraud
+    mapping(address => bool) public isFrozen;
+
+    event RiskScoreUpdated(address indexed account, uint256 newScore);
+    event AccountFrozen(address indexed account, string reason);
+
+    // Fixed for OpenZeppelin v5.0: Pass msg.sender to Ownable
+    constructor() ERC20("GlobalRiskCurrency", "GRC") Ownable(msg.sender) {
+        // Mint initial supply to the central bank (contract owner)
+        _mint(msg.sender, 1_000_000 * 10**decimals());
+    }
+
+    /**
+     * @dev Updates a user's risk score based on L1 Ledger data.
+     * If score > 90 (High Risk), the account is automatically frozen.
+     */
+    function updateRiskScore(address _account, uint256 _score) external onlyOwner {
+        require(_score <= 100, "Score must be 0-100");
+        riskScores[_account] = _score;
+        emit RiskScoreUpdated(_account, _score);
+
+        // AUTOMATION: If risk is high (e.g. Synthetic Identity suspected), freeze immediately.
+        if (_score >= 90) {
+            isFrozen[_account] = true;
+            emit AccountFrozen(_account, "High Risk: Potential Synthetic Identity");
+        }
+    }
+
+    /**
+     * @dev Manual freeze/unfreeze by authority
+     */
+    function setFrozenStatus(address _account, bool _status) external onlyOwner {
+        isFrozen[_account] = _status;
+        if (_status) {
+            emit AccountFrozen(_account, "Manual Admin Freeze");
+        }
+    }
+
+    /**
+     * @dev Overrides the standard transfer function to check for frozen status.
+     * This makes the token "Smart" and compliant with fraud regulations.
+     */
+    function transfer(address to, uint256 value) public virtual override returns (bool) {
+        require(!isFrozen[msg.sender], "FRAUD ALERT: Sender account is frozen.");
+        require(!isFrozen[to], "FRAUD ALERT: Recipient account is frozen.");
+        
+        return super.transfer(to, value);
+    }
+
+    /**
+     * @dev Overrides transferFrom (for approved spending) to check freeze status.
+     */
+    function transferFrom(address from, address to, uint256 value) public virtual override returns (bool) {
+        require(!isFrozen[from], "FRAUD ALERT: Source account is frozen.");
+        require(!isFrozen[to], "FRAUD ALERT: Recipient account is frozen.");
+        
+        return super.transferFrom(from, to, value);
+    }
+}
